@@ -779,6 +779,32 @@ end subroutine read_geomlt_file
     enddo
     deallocate(F)
 
+    ! ------------------------------------------
+    ! DEBUG
+    ! DUMP OUTPUT
+!    open(600)
+!    open(700)
+!    open(800)
+!    do S=1,nS
+!       do L = 1, nPa
+!          do K = 1, nE
+!             do J = 1, nT
+!               write(600,2000) (F2(S,I,J,K,L),I=1,nR)
+!             enddo
+!             write(700,2000) (FFactor(S,I,K,L),I=1,nR)
+!          enddo
+!       enddo
+!    enddo
+!    do L = 1, nPa
+!       do J = 1, nT
+!          write(800,2000) (FNHS(I,J,L),I=1,nR)
+!       enddo
+!    enddo
+!    close(600)
+!    close(700)
+!    close(800)
+    ! ------------------------------------------
+
     !! Plasmaspheric Densities
     iStatus = nf90_def_var(iFileID, 'NECR', nf90_double, (/nRDim,nTDim/), iNECRVar)
     iStatus = nf90_put_var(iFileID, iNECRVar, NECR(1:nR,1:nT))
@@ -786,6 +812,7 @@ end subroutine read_geomlt_file
     iStatus = nf90_close(iFileID)
     call ncdf_check(iStatus, NameSub)
 
+2000 format(500(1X,E26.16E3))
   endsubroutine write2DFlux
 
 !==================================================================================================

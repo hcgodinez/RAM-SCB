@@ -16,8 +16,8 @@ module ModRamRestart
     use ModRamFunctions, ONLY: RamFileName
     use ModRamTiming,    ONLY: TimeRamElapsed, TimeRamStart, TimeRamNow, DtsNext, &
                                TOld
-    use ModRamGrids,     ONLY: NR, NT, NE, NPA
-    use ModRamVariables, ONLY: F2, PParT, PPerT, FNHS, FNIS, BOUNHS, BOUNIS, &
+    use ModRamGrids,     ONLY: NR, NT, NE, NPA, NS
+    use ModRamVariables, ONLY: F2, PParT, PPerT, FNHS, FFactor, FNIS, BOUNHS, BOUNIS, &
                                BNES, HDNS, EIR, EIP, dBdt, dIdt, dIbndt, VTN, &
                                VTOL, VT, EIR, EIP, EKEV, PA
     use ModScbGrids,     ONLY: nthe, npsi, nzeta
@@ -35,7 +35,7 @@ module ModRamRestart
     implicit none
     
     integer :: iFluxEVar, iFluxHVar, iFluxHeVar, iFluxOVar, iPParTVar, &
-               iPPerTVar, iHVar, iBHVar, iEGridVar, iPaGridVar, &
+               iPPerTVar, iHVar, iFFVar, iBHVar, iEGridVar, iPaGridVar, &
                iIVar, iBIVar, iBNESVar, iHDNSVar, iEIRVar, iEIPVar, &
                iDtVar, iXVar, iYVar, iZVar, iBxVar, iByVar, iBzVar, &
                iVTNVar, iAValVar, iBValVar, iVTOLVar, &
@@ -46,6 +46,8 @@ module ModRamRestart
     integer :: nRDim, nTDim, nEDim, nPaDim, nSDim, nThetaDim, nPsiDim, &
                nZetaDim
     integer, parameter :: iDeflate = 2, yDeflate = 1
+
+    integer :: i, j, k, l, S
 
     character(len=999) :: NameFile
 
@@ -173,6 +175,11 @@ module ModRamRestart
     iStatus = nf90_def_var(iFileID, 'FNHS', nf90_double, &
                            (/nRDim,nTDim,NPaDim/), iHVar)
     iStatus = nf90_def_var_deflate(iFileID, iHVar, 0, yDeflate, iDeflate)
+
+    !!! FFactor
+    iStatus = nf90_def_var(iFileID, 'FFactor', nf90_double, &
+                           (/nSDim,nRDim,nEDim,nPaDim/), iFFVar)
+    iStatus = nf90_def_var_deflate(iFileID, iFFVar, 0, yDeflate, iDeflate)
 
     !!! Hbn
     iStatus = nf90_def_var(iFileID, 'BOUNHS', nf90_double, &
@@ -327,6 +334,7 @@ module ModRamRestart
 
     !! hI OUTPUTS
     iStatus = nf90_put_var(iFileID, iHVar,    FNHS(2:nR+1,:,:))
+    iStatus = nf90_put_var(iFileID, iFFVar,   FFactor(:,:,:,:))
     iStatus = nf90_put_var(iFileID, iBHVar,   BOUNHS(2:nR+1,:,:))
     iStatus = nf90_put_var(iFileID, iIVar,    FNIS(2:nR+1,:,:))
     iStatus = nf90_put_var(iFileID, iBIVar,   BOUNIS(2:nR+1,:,:))
@@ -368,6 +376,34 @@ module ModRamRestart
     ! CLOSE FILE
     iStatus = nf90_close(iFileID)
     call ncdf_check(iStatus, NameSub)
+
+    ! ------------------------------------------
+    ! DEBUG
+    ! DUMP OUTPUT
+!    open(900)
+!    open(1000)
+!    open(1100)
+!    do S=1,nS
+!       do L = 1, nPa
+!          do K = 1, nE
+!             do J = 1, nT
+!               write(900,2000) (F2(S,I,J,K,L),I=1,nR)
+!             enddo
+!             write(1000,2000) (FFactor(S,I,K,L),I=1,nR)
+!          enddo
+!       enddo
+!    enddo
+!    do L = 1, nPa
+!       do J = 1, nT
+!          write(1100,2000) (FNHS(I,J,L),I=1,nR)
+!       enddo
+!    enddo
+!    close(900)
+!    close(1000)
+!    close(1100)
+    ! ------------------------------------------
+
+2000 format(500(1X,E26.16E3))
 
   end subroutine write_restart
 
