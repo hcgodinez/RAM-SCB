@@ -23,6 +23,90 @@ from spacepy import datamodel
 import interpolation
 
 # -----------------------------------------------------------------
+#       get RAM dimension and coordinates
+# -----------------------------------------------------------------
+
+def get_ram_coordinates(ramscb):
+    '''
+    Parameters
+    ==========
+        ramscb : spacepy HDF5 datamodel object
+            spacepy HDF5 object with the ramscb data, which is usually read as
+
+            >>> import spacepy
+            >>> from spacepy import datamodel
+            >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
+
+    Returns
+    =======
+        species : dictionary
+            dictionary with species name
+        Lshell : numpy array
+            array with Lshell values used in the RAM-SCBE grid. As of now the
+            values are hardcoded into the RAM-SCBE code, hence they are also
+            hardcoded here. The values range from L=1.75 to L=6.5. The number
+            of L-shell can be determined from the RAM-SCBE restart file key
+            'nR'
+        MLT : numpy array
+            array with local magnetic time use in the RAM-SCBE grid. As with
+            L-shell, these are also hardcoded. The number of MLT can be
+            determined from the RAM-SCBE restart file key 'nT'
+        energy : numpy array
+            array with energy bins use in the RAM-SCBE grid. As with
+            L-shell, these are also hardcoded. The number of MLT can be
+            determined from the RAM-SCBE restart file key 'nE'
+        pitch_angle : numpy array
+            array with pitch angle's use in the RAM-SCBE grid. As with
+            L-shell, these are also hardcoded. The number of MLT can be
+            determined from the RAM-SCBE restart file key 'nPa'
+
+    Description
+    ===========
+    This routine gets the coordinates for RAM. NOTE: the coordinate are hardcoded into the RAM-SCB code.
+
+    Examples
+    ========
+
+    >>> import spacepy
+    >>> from spacepy import datamodel
+    >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
+    >>> species,Lshell,MLT,energy,pitch_angle = get_ram_coordinates(ramscb)
+
+    '''
+    # ----------------------------
+    #   get variables from restart
+    # ----------------------------
+
+    # L-Shell coordinates are hardcoded into RAM-SCB
+    NL = ramscb['nR'].shape[0]
+    Lmin = 1.75
+    Lmax = 6.5
+    Lshell = numpy.linspace(Lmin,Lmax,NL)
+
+    # magnetic local time is also hardcoded into RAM-SCB
+    NMLT = ramscb['nT'].shape[0]
+    MLTmin = 0.0
+    MLTmax = 24.0
+    MLT = numpy.linspace(MLTmin,MLTmax,NMLT)
+
+    # get the energy grid
+    NE = ramscb['nE'].shape[0]
+    energy = numpy.array(ramscb['EnergyGrid'])
+
+    # get the pitch angle grid
+    NPA = ramscb['nPa'].shape[0]
+    pitch_angle = numpy.array(ramscb['PitchAngleGrid'])
+
+    species = {
+            0: 'FluxE',
+            1: 'FluxH',
+            2: 'FluxHe',
+            3: 'FluxO'
+            }
+
+    return species,Lshell,MLT,energy,pitch_angle
+
+# -----------------------------------------------------------------
 #       compute flux from RAM-SCB restart files
 # -----------------------------------------------------------------
 
@@ -84,27 +168,38 @@ def compute_restart_flux(ramscb):
     #   get variables from restart
     # ----------------------------
 
-    # L-Shell coordinates are hardcoded into RAM-SCB
+###    # L-Shell coordinates are hardcoded into RAM-SCB
+###    NL = ramscb['nR'].shape[0]
+###    Lmin = 1.75
+###    Lmax = 6.5
+###    Lshell = numpy.linspace(Lmin,Lmax,NL)
+###
+###    # magnetic local time is also hardcoded into RAM-SCB
+###    NMLT = ramscb['nT'].shape[0]
+###    MLTmin = 0.0
+###    MLTmax = 24.0
+###    MLT = numpy.linspace(MLTmin,MLTmax,NMLT)
+###
+###    # get the energy grid
+###    NE = ramscb['nE'].shape[0]
+###    energy = numpy.array(ramscb['EnergyGrid'])
+###
+###    # get the pitch angle grid
+###    NPA = ramscb['nPa'].shape[0]
+###    pitch_angle = numpy.array(ramscb['PitchAngleGrid'])
+
+    # get information from ramscb
+    species,Lshell,MLT,energy,pitch_angle = get_ram_coordinates(ramscb)
+
+    # number of L-shells
     NL = ramscb['nR'].shape[0]
-    Lmin = 1.75
-    Lmax = 6.5
-    Lshell = numpy.linspace(Lmin,Lmax,NL)
-
-    # magnetic local time is also hardcoded into RAM-SCB
+    # number of magnetic local time
     NMLT = ramscb['nT'].shape[0]
-    MLTmin = 0.0
-    MLTmax = 24.0
-    MLT = numpy.linspace(MLTmin,MLTmax,NMLT)
-
-    # get the energy grid
+    # number of energy channels
     NE = ramscb['nE'].shape[0]
-    energy = numpy.array(ramscb['EnergyGrid'])
-
-    # get the pitch angle grid
+    # number of pitch angles
     NPA = ramscb['nPa'].shape[0]
-    pitch_angle = numpy.array(ramscb['PitchAngleGrid'])
-
-    # get number of species
+    # number of species
     NS = ramscb['nS'].shape[0]
 
     # get FFactor array
@@ -121,12 +216,12 @@ def compute_restart_flux(ramscb):
     #   compute fluxes
     # ----------------------------
 
-    species = {
-            0: 'FluxE',
-            1: 'FluxH',
-            2: 'FluxHe',
-            3: 'FluxO'
-            }
+###    species = {
+###            0: 'FluxE',
+###            1: 'FluxH',
+###            2: 'FluxHe',
+###            3: 'FluxO'
+###            }
 
     # initialize flux array
     Flux = numpy.zeros((NS,NL,NMLT,NE,NPA),dtype=float)
@@ -893,7 +988,7 @@ def relabel_pitchangle(ramscb):
 #       interpolate the flux from RAM to SCB grid
 # -----------------------------------------------------------------
 
-def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
+def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
     '''
     Parameters
     ==========
@@ -919,6 +1014,10 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
             array which stores the index of the available pitch angles for the
             off-equator flux
 
+        ram_flux : numpy array, optional
+            array with the computed flux from ram, if not provided we compute
+            the flux using the ramscb object
+
     Returns
     =======
 
@@ -939,9 +1038,10 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
     >>> from spacepy import datamodel
     >>> import ramscb_da
     >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
+    >>> species,Lshell,MLT,energy,pitch_angle,Flux = compute_restart_flux(ramscb)
     >>> scb_pa = ramscb_da.relabel_pitchangle(ramscb)
     >>> ispecies = 0
-    >>> scb_flux = ramscb_da.interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa)
+    >>> scb_flux = ramscb_da.interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=Flux)
 
     '''
 
@@ -949,7 +1049,14 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
     #   get RAM coordinates and flux
     # ----------------------------
 
-    species,Lshell,MLT,energy,pitch_angle,Flux = compute_restart_flux(ramscb)
+    if (len(ram_flux) == 0):
+
+        species,Lshell,MLT,energy,pitch_angle,ram_flux = compute_restart_flux(ramscb)
+
+    else:
+
+        # get information from ramscb
+        species,Lshell,MLT,energy,pitch_angle = get_ram_coordinates(ramscb)
 
     # get number of energy bins and pitch angles
     nE = energy.shape[0]
@@ -982,10 +1089,9 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
     ram_kdtree = spatial.KDTree(ram_grid)
 
     # ----------------------------
-    # compute flux in SCB grid-points
+    # get SCB grid coordinates
     # ----------------------------
 
-    # x, y, and z SM coordinates for the SCB grid
     scbx = numpy.array(ramscb['x'])
     scby = numpy.array(ramscb['y'])
     scbz = numpy.array(ramscb['z'])
@@ -993,29 +1099,35 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
     # get the dimension
     nx,ny,nz = scbx.shape
 
+    # get SCB gridpoint array
+    scb_sm = numpy.array([scbx.flatten(), scby.flatten(), scbz.flatten()]).T
+
+    # declare KDTree object to find closest points
+    scb_kdtree = spatial.KDTree(scb_sm)
+
+    # ----------------------------
+    #   inerpolate flux to SCB grid
+    # ----------------------------
+
+    # only do the first species
+    ispecies = 0
+
     # compute the pitch angles in the SCB grid
-    scb_pa = ramscb_da.relabel_pitchangle(ramscb)
+    scb_pa = relabel_pitchangle(ramscb)
 
     # initialize SCB flux array
     scb_flux = numpy.zeros((nS,nx,ny,nz,nE,nPA),dtype=float)
 
-    # massive for loop for the SCB grid
+    # get SCB equatorial grid-points coordinates
+    scb_grid = []
+    scb_grid_index_flat_full = []
+    scb_grid_index_flat = []
+
+    # main loop to identify equatorial SCB grid-point
     for i in numpy.arange(nx):
-
-        print('===================================')
-        print(str(i))
-        print('-----------------------------------')
-
         for j in numpy.arange(ny):
 
-            print(str(j))
-
-            # ----------------------------
-            #   locate RAM grid-point to 
-            #   the equatorial SCB grid-point
-            # ----------------------------
-
-            # get equatorial z-coordinate index
+            # get equatorial SCB z-coordinate index
             k = numpy.argmin(numpy.abs(scbz[i,j,:]))
 
             # get x and y coordinates for the equatorial SCB grid-point
@@ -1031,80 +1143,57 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa):
 
             if ( (scb_Lshell > Lshell[0]) and (scb_Lshell < Lshell[-1]) ):
 
-                # locate RAM grid-point that is closest to the equatorial SCBE
-                # grid-point
-                dist, idx_ram_scb = ram_kdtree.query(numpy.array([scb_eq_x,scb_eq_y]),8)
+                scb_grid.append([scb_eq_x,scb_eq_y])
+                scb_grid_index_flat_full.append(numpy.ravel_multi_index((i,j,k),(nx,ny,nz)))
+                scb_grid_index_flat.append(numpy.ravel_multi_index((i,j),(nx,ny)))
 
-                # unravel index for 2-D arrays
-                X_ram_eq = []
-                Y_ram_eq = []
-                idx_ram_scb_xy = []
-                for iscb in idx_ram_scb:
+    # convert the point to numpy array
+    scb_grid = numpy.array(scb_grid)
 
-                    # get index
-                    idxxy = numpy.unravel_index(iscb,X.shape)
+    # number of equatorial SCB grid-points
+    num_eq_scb_grid = len(scb_grid_index_flat_full)
 
-                    # get corresponding L-shell
-                    Lshell_ram_scb = Lshell[idxxy[1]]
+    # initialize the equatorial SCB flux
+    scb_flux_eq_flat = numpy.zeros((nE,nPA,num_eq_scb_grid),dtype=float)
 
-                    #pdb.set_trace()
+    # initialize scb flux in equator array
+    scb_flux_eq = numpy.zeros((nE,nPA,nx,ny),dtype=float)
 
-                    # check if point is inner region
-                    if ( (Lshell_ram_scb > Lshell[0]) and (Lshell_ram_scb < Lshell[-1]) ):
+    # main for loop to interpolate the SCB flux along the equatorial plane
+    # for all available energy channels and pitch-angles
+    for iE in numpy.arange(nE):
+        for iPA in numpy.arange(nPA):
 
-                        # append index
-                        idx_ram_scb_xy.append(idxxy)
+            # get target ram flux
+            ram_flux_EPA = ram_flux[ispecies,:,:,iE,iPA].T
+            ram_flux_EPA = ram_flux_EPA.flatten()
+            
+            # need to mask the negative flux
+            idx = numpy.where(ram_flux_EPA>0.0)[0]
+            ram_flux_EPA = ram_flux_EPA[idx]
+            ram_grid_tmp = ram_grid[idx,:]
 
-                        # append to RAM x and y coordinates
-                        X_ram_eq.append(X[idxxy])
-                        Y_ram_eq.append(Y[idxxy])
+            # get values and convert to log scale
+            ram_flux_EPA = numpy.log(ram_flux_EPA)
 
-                # convert to numpy arrays
-                X_ram_eq = numpy.array(X_ram_eq)
-                Y_ram_eq = numpy.array(Y_ram_eq)
-                idx_ram_scb_xy = numpy.array(idx_ram_scb_xy)
+            # interpolate RAM flux to equatorial SCB grid-points for the
+            # particular energy and pitch angle
+            scb_flux_eq_flat[iE,iPA,:] = \
+                    numpy.exp(interpolate.griddata(ram_grid_tmp,ram_flux_EPA,scb_grid))
 
-                # coordinate array
-                points = numpy.array([X_ram_eq,Y_ram_eq]).T
+            # for equatorial SCB grid-points that are outside the convex hull
+            # of the RAM grid-points, just get the nearest neighbor
+            idx_nan = numpy.where(numpy.isnan(scb_flux_eq_flat[iE,iPA,:]))[0]
+            if (len(idx_nan) > 0):
+                scb_flux_eq_flat[iE,iPA,idx_nan] = numpy.exp(interpolate.griddata(ram_grid_tmp,ram_flux_EPA,scb_grid[idx_nan,:],method='nearest'))
 
-                # SCB coordinates
-                xi = numpy.array([scb_eq_x,scb_eq_y])
+            # place in second array
+            flux_tmp2 = -1.0e+4*numpy.ones((nx*ny),dtype=float)
+            flux_tmp2[scb_grid_index_flat] = scb_flux_eq_flat[iE,iPA,:]
+            scb_flux_eq[iE,iPA,:,:] = flux_tmp2.reshape((nx,ny))
 
-                # get the corresponding index in the RAM grid
-                idx_MLT = idx_ram_scb_xy[:,0]
-                idx_L = idx_ram_scb_xy[:,1]
 
-                # ----------------------------
-                #   interpolate Flux to SCB grid
-                # ----------------------------
-
-                # first intepolate the RAM Flux over the RAM pitch angle and
-                # energy spectrum to the spatial location of the equatorial SCB
-                # grid-point
-                flux_eq_scb = numpy.zeros((nE,nPA),dtype=float)
-
-                for iE in numpy.arange(nE):
-                    for iPA in numpy.arange(nPA):
-
-                        values = []
-                        for iL,iMLT in zip(idx_L,idx_MLT):
-                            values.append(Flux[ispecies,iL,iMLT,iE,iPA])
-
-                        # convert to log scale
-                        values = numpy.log(values)
-
-                        # interpolate in log scale and take exponent
-                        flux_eq_scb[iE,iPA] = numpy.exp(interpolate.griddata(points,values,xi))
-
-                # second interpolate over the SCB pitch angles using the
-                # interpolated flux on the equatorial SCB grid-point
-                for k in numpy.arange(nz):
-                    for iE in numpy.arange(nE):
-                        values = numpy.log(flux_eq_scb[iE,:])
-                        xi = scb_pa[i,j,k,:]
-                        scb_flux[ispecies,i,j,k,iE,:] = numpy.exp(interpolate.griddata(pitch_angle,values,xi))
-
-    return scb_flux
+    return scb_flux_eq
 
 # -----------------------------------------------------------------
 #       get coordinate index of the SCB coordinates that match SM coordinates
