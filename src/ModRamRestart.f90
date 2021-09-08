@@ -414,7 +414,7 @@ module ModRamRestart
     use ModRamGrids,     ONLY: nPa, nT, nR
     use ModRamFunctions, ONLY: RamFileName
     use ModRamTiming,    ONLY: DtsNext, TOld
-    use ModRamVariables, ONLY: F2, PParT, PPerT, FNHS, FNIS, BOUNHS, BOUNIS, &
+    use ModRamVariables, ONLY: F2, PParT, PPerT, FNHS, FFactor, FNIS, BOUNHS, BOUNIS, &
                                BNES, HDNS, EIR, EIP, dBdt, dIdt, dIbndt, VTN, &
                                VTOL, VT, EIR, EIP, PParH, PPerH, PParO, PAbn, &
                                PPerO, PParHe, PPerHe, PParE, PPerE, LZ, MU
@@ -434,7 +434,7 @@ module ModRamRestart
     
     integer :: j, L
     integer :: iFluxEVar, iFluxHVar, iFluxHeVar, iFluxOVar, iPParTVar, &
-               iPPerTVar, iHVar, iBHVar, iBxVar, iByVar, iBzVar, &
+               iPPerTVar, iHVar, iFFVar, iBHVar, iBxVar, iByVar, iBzVar, &
                iIVar, iBIVar, iBNESVar, iHDNSVar, iEIRVar, iEIPVar, &
                iDtVar, iXVar, iYVar, iZVar, &
                iVTNVar, iAValVar, iBValVar, iVTOLVar, &
@@ -478,6 +478,7 @@ module ModRamRestart
 
     !! hI OUTPUTS
     iStatus = nf90_inq_varid(iFileID, 'FNHS',   iHVar)
+    iStatus = nf90_inq_varid(iFileID, 'FFactor',iFFVar)
     iStatus = nf90_inq_varid(iFileID, 'BOUNHS', iBHVar)
     iStatus = nf90_inq_varid(iFileID, 'FNIS',   iIvar)
     iStatus = nf90_inq_varid(iFileID, 'BOUNIS', iBIVar)
@@ -547,6 +548,7 @@ module ModRamRestart
 
     !! hI OUTPUTS
     iStatus = nf90_get_var(iFileID, iHVar,    FNHS(2:nR+1,:,:))
+    iStatus = nf90_get_var(iFileID, iFFVar,   FFactor(:,:,:,:))
     iStatus = nf90_get_var(iFileID, iBHVar,   BOUNHS(2:nR+1,:,:))
     iStatus = nf90_get_var(iFileID, iIVar,    FNIS(2:nR+1,:,:))
     iStatus = nf90_get_var(iFileID, iBIVar,   BOUNIS(2:nR+1,:,:))
