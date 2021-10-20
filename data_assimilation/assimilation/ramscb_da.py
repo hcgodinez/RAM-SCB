@@ -4,12 +4,16 @@ import datetime
 import copy
 import itertools
 import pdb
+import math
 
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
 
 import pylab
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
+
+import astropy
+from astropy.coordinates import cartesian_to_spherical
 
 import scipy
 from scipy import integrate
@@ -19,6 +23,7 @@ from scipy import spatial
 import spacepy
 from spacepy import pycdf
 from spacepy import datamodel
+from spacepy.pybats import ram as rampy
 
 import interpolation
 
@@ -524,25 +529,16 @@ def compute_omnidirectional_flux_RBSP(rbsp,species,start,stop):
     '''
 
     # ----------------------------
-    #       read data
-    # ----------------------------
-
-    # read RBSP data file
-    #rbsp = pycdf.CDF(filename)
-
-    # ----------------------------
     #   get energy and pitch angles
     # ----------------------------
 
     # get number of pitch angles
-    #pitch_angle = rbsp['FPDU_Alpha'][:]
     pitch_angle = rbsp[species+'_Alpha'][:]
     idx_pitch_angle = numpy.where(pitch_angle >= 0.0)[0]
     pitch_angle = pitch_angle[idx_pitch_angle]
 
     # get Energy spectrum between 1.0 KeV and 400.0 KeV 
     # for both satellites
-    #energy = rbsp['FPDU_Energy'][:]
     energy = rbsp[species+'_Energy'][:]
     idx_E = numpy.where(energy >= 0.0)[0]
     energy = energy[idx_E]
@@ -551,7 +547,6 @@ def compute_omnidirectional_flux_RBSP(rbsp,species,start,stop):
     #   get dates
     # ----------------------------
 
-    #dates = rbsp['FPDU_Epoch'][:]
     dates = rbsp[species+'_Epoch'][:]
     idx_start = numpy.where(dates >= start)[0]
     idx_stop = numpy.where(dates <= stop)[0]
@@ -621,7 +616,7 @@ def compute_omnidirectional_flux_RBSP(rbsp,species,start,stop):
 #       get SM coordinates of RBSP satellite from emphemeris file
 # -----------------------------------------------------------------
 
-def get_SM_RBSP(rbsp_dates,rbsp_ephem):
+def get_SM_RBSP(rbsp_dates, rbsp_ephem, start=None, stop=None):
 
     '''
     Parameters
@@ -697,58 +692,68 @@ def get_SM_RBSP(rbsp_dates,rbsp_ephem):
         # get date from RBSP flux file
         rbsp_date_k = rbsp_dates[idate]
 
-        # find date in RBSP ephemeris file
-        idx = numpy.argmin(numpy.abs(rbsp_ephem_dates-rbsp_date_k))
+        # check that date is within interval if start and stop is given
+        compute_sm_coordinate = True
+        if (start and stop):
 
-        # find time interval
-        if (rbsp_date_k > rbsp_ephem_dates[idx]):
+            # check that dates are correct
+            if (start > stop):
+                raise ValueError('start must be earlier than stop dates')
 
-            # get time interval
-            t0 = rbsp_ephem_dates[idx]
-            t1 = rbsp_ephem_dates[idx+1]
+            if ( (rbsp_date_k < start) or 
+                    (rbsp_date_k > stop) ):
+                compute_sm_coordinate = False
 
-            # get coordinates for t0
-            p0 = numpy.array(rbsp_ephem['Rsm'][idx,:])
-            p1 = numpy.array(rbsp_ephem['Rsm'][idx+1,:])
+        if compute_sm_coordinate:
 
-        else:
+            # find date in RBSP ephemeris file
+            idx = numpy.argmin(numpy.abs(rbsp_ephem_dates-rbsp_date_k))
 
-            # get time interval
-            t0 = rbsp_ephem_dates[idx-1]
-            t1 = rbsp_ephem_dates[idx]
+            # find time interval
+            if (rbsp_date_k > rbsp_ephem_dates[idx]):
 
-            # get coordinates for t0
-            p0 = numpy.array(rbsp_ephem['Rsm'][idx-1,:])
-            p1 = numpy.array(rbsp_ephem['Rsm'][idx,:])
+                # get time interval
+                t0 = rbsp_ephem_dates[idx]
+                t1 = rbsp_ephem_dates[idx+1]
 
-        #print('date rbsp flux file: '+rbsp_date_k.strftime('%Y-%m-%dT%H:%M:%S:%f'))
-        #print('index: '+str(idx))
-        #print('t0: '+t0.strftime('%Y-%m-%dT%H:%M:%S:%f'))
-        #print('t1: '+t1.strftime('%Y-%m-%dT%H:%M:%S:%f'))
-        #pdb.set_trace()
+                # get coordinates for t0
+                p0 = numpy.array(rbsp_ephem['Rsm'][idx,:])
+                p1 = numpy.array(rbsp_ephem['Rsm'][idx+1,:])
 
-        # compute difference between rbsp flux date and initial date in interval
-        dt = rbsp_date_k-t0
-        dt = dt.total_seconds()
+            else:
 
-        # compute difference between date interval
-        dtt = t1-t0
-        dtt = dtt.total_seconds()
+                # get time interval
+                t0 = rbsp_ephem_dates[idx-1]
+                t1 = rbsp_ephem_dates[idx]
 
-        # compute proportion
-        pt = dt/dtt
+                # get coordinates for t0
+                p0 = numpy.array(rbsp_ephem['Rsm'][idx-1,:])
+                p1 = numpy.array(rbsp_ephem['Rsm'][idx,:])
 
-        # compute distance between the two points
-        v = p1-p0
 
-        # compute the desired distance
-        d = numpy.linalg.norm(v)*pt
+            # compute difference between rbsp flux date and 
+            # initial date in interval
+            dt = rbsp_date_k-t0
+            dt = dt.total_seconds()
 
-        # compute interpolation between the points
-        pd = p0+d/numpy.linalg.norm(v)*v
+            # compute difference between date interval
+            dtt = t1-t0
+            dtt = dtt.total_seconds()
 
-        # append to rbsp position array
-        rbsp_sm_position.append(copy.copy(pd))
+            # compute proportion
+            pt = dt/dtt
+
+            # compute distance between the two points
+            v = p1-p0
+
+            # compute the desired distance
+            d = numpy.linalg.norm(v)*pt
+
+            # compute interpolation between the points
+            pd = p0+d/numpy.linalg.norm(v)*v
+
+            # append to rbsp position array
+            rbsp_sm_position.append(numpy.copy(pd))
 
     # convert to numpy array
     rbsp_sm_position = numpy.array(rbsp_sm_position)
@@ -957,30 +962,6 @@ def relabel_pitchangle(ramscb):
             # assigned re-labeled pitch angles
             scb_pa[i,j,:,:] = alpha_eq[...]
 
-###            # for loop along the magnetic field
-###            for k in numpy.arange(nz):
-###                Bloc = B[i,j,k] 
-###
-###                #pdb.set_trace()
-###
-###                # pitch angle loop
-###                for l,alpha in enumerate(cosPA):
-###
-###                    # compute the equivalent equatorial alpha
-###                    alpha_eq = 1.0-Beq/Bloc*(1.0-alpha**2)
-###
-###                    if (alpha_eq >= 0):
-###
-###                        # get the square root of the pitch angle
-###                        alpha_eq = numpy.sqrt(alpha_eq)
-###
-###                        # find appropriate equatorial alpha
-###                        # Because of the magnetic field strength, only a small set
-###                        # of unique pitch angles are present. That is to say, the
-###                        # flux is not present in all pitch angles from 0 to pi/2
-###                        # rad.
-###                        idx = numpy.argmin(numpy.abs(cosPA-alpha_eq))
-###                        scb_pa[i,j,k,l] = idx
 
     return scb_pa
 
@@ -1023,12 +1004,13 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
 
         scb_flux : numpy array
             array which stores the flux of the available pitch angles for the
-            off-equator SCB grid-points
+            equatorial SCB grid-points
 
     Description
     ===========
-        This subroutine provides the index of the available pitch angles valid
-        for the off-equator flux. 
+        This subroutine provides the SCB flux along the grid-points that are on
+        the equator. For the off-equator flux you need to use
+        off_equator_SCB_flux subroutine. 
 
     Examples
     ========
@@ -1038,7 +1020,7 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
     >>> from spacepy import datamodel
     >>> import ramscb_da
     >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
-    >>> species,Lshell,MLT,energy,pitch_angle,Flux = compute_restart_flux(ramscb)
+    >>> species,Lshell,MLT,energy,pitch_angle,Flux = ramscb_da.compute_restart_flux(ramscb)
     >>> scb_pa = ramscb_da.relabel_pitchangle(ramscb)
     >>> ispecies = 0
     >>> scb_flux = ramscb_da.interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=Flux)
@@ -1072,21 +1054,29 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
     # convert MLT to radians
     rho = numpy.pi/12.0*MLT - numpy.pi/2.0
 
-    # initialize the X and Y cartesian arrays
-    X = numpy.zeros((nMLT,nLshell),dtype=float)
-    Y = numpy.zeros((nMLT,nLshell),dtype=float)
+    # initialize arrays
+    ram_grid_flat = []
+    ram_flux_flat = []
 
     # convert to cartesian
     for j,L in enumerate(Lshell):
-        for i,r in enumerate(rho):
-            X[i,j] = L*numpy.cos(r)
-            Y[i,j] = L*numpy.sin(r)
 
-    # reshape array for KD tree function
-    ram_grid = numpy.array([X.flatten(),Y.flatten()]).T
+        # discart RAM inner boundary for the interpolation
+        if (L > Lshell[1]):
+
+            for i,r in enumerate(rho):
+                ram_x_cart = L*numpy.cos(r)
+                ram_y_cart = L*numpy.sin(r)
+
+                ram_grid_flat.append([ram_x_cart,ram_y_cart])
+                ram_flux_flat.append(ram_flux[ispecies,j,i,:,:])
+
+    # convert to numpy arrays
+    ram_grid_flat = numpy.array(ram_grid_flat)
+    ram_flux_flat = numpy.array(ram_flux_flat)
 
     # get KD tree object
-    ram_kdtree = spatial.KDTree(ram_grid)
+    ram_kdtree = spatial.KDTree(ram_grid_flat)
 
     # ----------------------------
     # get SCB grid coordinates
@@ -1112,11 +1102,8 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
     # only do the first species
     ispecies = 0
 
-    # compute the pitch angles in the SCB grid
-    scb_pa = relabel_pitchangle(ramscb)
-
     # initialize SCB flux array
-    scb_flux = numpy.zeros((nS,nx,ny,nz,nE,nPA),dtype=float)
+    #scb_flux = numpy.zeros((nS,nx,ny,nz,nE,nPA),dtype=float)
 
     # get SCB equatorial grid-points coordinates
     scb_grid = []
@@ -1141,7 +1128,7 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
             scb_rho = numpy.arctan2(scb_eq_y,scb_eq_x)
             scb_Lshell = numpy.sqrt(scb_eq_x**2+scb_eq_y**2)
 
-            if ( (scb_Lshell > Lshell[0]) and (scb_Lshell < Lshell[-1]) ):
+            if ( (scb_Lshell > Lshell[1]) and (scb_Lshell < Lshell[-1]) ):
 
                 scb_grid.append([scb_eq_x,scb_eq_y])
                 scb_grid_index_flat_full.append(numpy.ravel_multi_index((i,j,k),(nx,ny,nz)))
@@ -1157,7 +1144,9 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
     scb_flux_eq_flat = numpy.zeros((nE,nPA,num_eq_scb_grid),dtype=float)
 
     # initialize scb flux in equator array
-    scb_flux_eq = numpy.zeros((nE,nPA,nx,ny),dtype=float)
+    #scb_flux_eq = numpy.zeros((nE,nPA,nx,ny),dtype=float)
+    #scb_flux_eq2 = numpy.zeros((nx,ny,nE,nPA),dtype=float)
+    scb_flux_eq = numpy.zeros((nx,ny,nE,nPA),dtype=float)
 
     # main for loop to interpolate the SCB flux along the equatorial plane
     # for all available energy channels and pitch-angles
@@ -1165,13 +1154,14 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
         for iPA in numpy.arange(nPA):
 
             # get target ram flux
-            ram_flux_EPA = ram_flux[ispecies,:,:,iE,iPA].T
-            ram_flux_EPA = ram_flux_EPA.flatten()
+            #ram_flux_EPA = ram_flux[ispecies,:,:,iE,iPA].T
+            #ram_flux_EPA = ram_flux_EPA.flatten()
+            ram_flux_EPA = ram_flux_flat[:,iE,iPA]
             
             # need to mask the negative flux
             idx = numpy.where(ram_flux_EPA>0.0)[0]
             ram_flux_EPA = ram_flux_EPA[idx]
-            ram_grid_tmp = ram_grid[idx,:]
+            ram_grid_EPA = ram_grid_flat[idx,:]
 
             # get values and convert to log scale
             ram_flux_EPA = numpy.log(ram_flux_EPA)
@@ -1179,34 +1169,149 @@ def interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=[]):
             # interpolate RAM flux to equatorial SCB grid-points for the
             # particular energy and pitch angle
             scb_flux_eq_flat[iE,iPA,:] = \
-                    numpy.exp(interpolate.griddata(ram_grid_tmp,ram_flux_EPA,scb_grid))
+                    numpy.exp(interpolate.griddata(ram_grid_EPA,ram_flux_EPA,scb_grid))
+
+            #pdb.set_trace()
 
             # for equatorial SCB grid-points that are outside the convex hull
             # of the RAM grid-points, just get the nearest neighbor
             idx_nan = numpy.where(numpy.isnan(scb_flux_eq_flat[iE,iPA,:]))[0]
             if (len(idx_nan) > 0):
-                scb_flux_eq_flat[iE,iPA,idx_nan] = numpy.exp(interpolate.griddata(ram_grid_tmp,ram_flux_EPA,scb_grid[idx_nan,:],method='nearest'))
+                scb_flux_eq_flat[iE,iPA,idx_nan] = \
+                        numpy.exp(interpolate.griddata(ram_grid_EPA,
+                            ram_flux_EPA,scb_grid[idx_nan,:],method='nearest'))
 
             # place in second array
             flux_tmp2 = -1.0e+4*numpy.ones((nx*ny),dtype=float)
             flux_tmp2[scb_grid_index_flat] = scb_flux_eq_flat[iE,iPA,:]
-            scb_flux_eq[iE,iPA,:,:] = flux_tmp2.reshape((nx,ny))
-
+            #scb_flux_eq[iE,iPA,:,:] = flux_tmp2.reshape((nx,ny))
+            #scb_flux_eq2[:,:,iE,iPA] = flux_tmp2.reshape((nx,ny))
+            scb_flux_eq[:,:,iE,iPA] = flux_tmp2.reshape((nx,ny))
 
     return scb_flux_eq
+
+# -----------------------------------------------------------------
+#       interpolate the flux from RAM to SCB grid
+# -----------------------------------------------------------------
+
+def interpolate_off_equator_SCB_flux(ramscb, scb_flux_eq, scb_pa,
+                                     scb_grid_point_index):
+
+    '''
+    Parameters
+    ==========
+        ramscb : spacepy HDF5 datamodel object
+            spacepy HDF5 object with the ramscb data, which is usually read as
+
+            >>> import spacepy
+            >>> from spacepy import datamodel
+            >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
+
+        scb_flux_eq : numpy array
+            array which stores the flux of the available pitch angles for the
+            equatorial SCB grid-points
+
+        scb_pa : numpy array
+            array which stores the index of the available pitch angles for the
+            off-equator flux
+
+        scb_grid_point_index : numpy array
+            array with the SCB grid-point indexes for which to compute the
+            off-equator flux.
+            the array is organized as follows:
+            scb_grid_point_index = numpy.array([ [idx1, idy1, idz1],
+                                                 [idx2, idy2, idz2],
+                                                 .....  ....  ....
+                                                 [idxN, idyN, idzN], ])
+
+    Returns
+    =======
+
+        scb_flux : numpy array
+            array which stores the flux of the available pitch angles for the
+            specified SCB grid-points in the scb_grid_point_index numpy array.
+
+
+    Description
+    ===========
+        This subroutine provides the SCB flux on the grid-points specified in
+        the index array. These grid-points are usually off-equator, and their
+        flux is essentially computed by first "relabeling" the pitch angles
+        availabel, and then interpolate the flux along these pitch angles from
+        the equator fluxes.
+        
+
+    Examples
+    ========
+
+    >>> import numpy
+    >>> import spacepy
+    >>> from spacepy import datamodel
+    >>> import ramscb_da
+    >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
+    >>> species,Lshell,MLT,energy,pitch_angle,Flux = ramscb_da.compute_restart_flux(ramscb)
+    >>> scb_pa = ramscb_da.relabel_pitchangle(ramscb)
+    >>> ispecies = 0
+    >>> scb_flux_eq = ramscb_da.interpolate_RAM_flux_to_SCB(ramscb,ispecies,scb_pa,ram_flux=Flux)
+
+    '''
+
+    # ----------------------------
+    #   get RAM coordinates and flux
+    # ----------------------------
+
+    # get information from ramscb
+    species,Lshell,MLT,energy,pitch_angle = get_ram_coordinates(ramscb)
+
+    # get number of energy bins and pitch angles
+    nE = energy.shape[0]
+    nPA = pitch_angle.shape[0]
+    nS = len(species)
+    nLshell = Lshell.shape[0]
+    nMLT = MLT.shape[0]
+
+    # ----------------------------
+    # get SCB grid coordinates
+    # ----------------------------
+
+    scbx = numpy.array(ramscb['x'])
+    scby = numpy.array(ramscb['y'])
+    scbz = numpy.array(ramscb['z'])
+
+    # get the dimension
+    nx,ny,nz = scbx.shape
+
+    # get number of available grid-points
+    ngrid = scb_grid_point_index.shape[0]
+
+    # initialize the scb flux array
+    scb_flux = numpy.zeros((ngrid,nE,nPA),dtype=float)
+
+    #pdb.set_trace()
+
+    # main loop for SCB grid-point
+    for iidx,idx in enumerate(scb_grid_point_index):
+
+        # get individual indexes
+        i,j,k = idx
+
+        # interpolate the flux on the relabeled pitch angles
+        for iE in numpy.arange(nE):
+            f = interpolate.interp1d(pitch_angle, scb_flux_eq[i,j,iE,:])
+            scb_flux[iidx,iE,:] = f(scb_pa[i,j,k,:])
+
+    return scb_flux
 
 # -----------------------------------------------------------------
 #       get coordinate index of the SCB coordinates that match SM coordinates
 #       from the RBSP satellite position
 # -----------------------------------------------------------------
 
-def interpolate_flux_RAMSCB_RBSP(rbsp_sm_position,ramscb):
+def interpolate_flux_RAMSCB_RBSP(ramscb, rbsp, rbsp_ephem,
+                                 start=None, stop=None, ispecies=0):
     '''
     Parameters
     ==========
-        rbsp_sm_position : numpy array
-            three dimensional position of the RBSP spacecraft in SM coordinates
-
         ramscb : spacepy HDF5 datamodel object
             spacepy HDF5 object with the ramscb data, which is usually read as
 
@@ -1230,362 +1335,182 @@ def interpolate_flux_RAMSCB_RBSP(rbsp_sm_position,ramscb):
 
     >>> import numpy
     >>> import spacepy
-    >>> from spacepy import pycdf
     >>> from spacepy import datamodel
+    >>> from spacepy import pycdf
     >>> import ramscb_da
     >>> ramscb = datamodel.fromHDF5('ram-scbe-restart-file-name.nc')
     >>> rbsp = pycdf.CDF('name_rbsp_file_to_read.nc')
-    >>> rbsp_dates = numpy.array(rbsp['Epoch'])
     >>> rbsp_ephem = datamodel.fromHDF5('rbsp_ephemeris_file.h5')
-    >>> rbsp_sm_position = ramscb_da.get_SM_RBSP(rbsp_dates,rbsp_ephem)
-    >>> rbsp_flux = ramscb_da.interpolate_flux_RAMSCB_RBSP(rbsp_sm_position,ramscb)
-
+    >>> ramscb_rbsp_flux = ramscb_da.interpolate_flux_RAMSCB_RBSP(ramscb,rbsp,rbsp_ephem)
     '''
 
-    # get information of the ramscb object
-    ramscb_species,ramscb_Lshell,ramscb_MLT, \
-    ramscb_energy,ramscb_pitch_angle, \
-    ramscb_flux = compute_restart_flux(ramscb)
+    if (start and stop):
 
-    # get index of closes SCB grid-point to the RBSP satellite location
-    scb_coor_index = find_SM_point_SCB_grid(rbsp_sm_position,ramscb)
+        # check that dates are correct
+        if (start > stop):
+            raise ValueError('start must be earlier than stop dates')
 
-    # get SCB grid coordinates that are on the equatorial plane
+        # get SM coordinates of the RBSP satellite location
+        rbsp_dates = numpy.array(rbsp['Epoch'])
+        rbsp_sm_position = get_SM_RBSP(rbsp_dates, rbsp_ephem, 
+                                       start=start, stop=stop)
+
+    else:
+
+        # get SM coordinates of the RBSP satellite location
+        rbsp_dates = numpy.array(rbsp['Epoch'])
+        rbsp_sm_position = get_SM_RBSP(rbsp_dates, rbsp_ephem)
+
+    # compute the RAM flux and get all information
+    species, Lshell, MLT, energy,\
+            pitch_angle, Flux = compute_restart_flux(ramscb)
+
+    # get number of energy bins and pitch angles
+    nE = energy.shape[0]
+    nPA = pitch_angle.shape[0]
+
+    # relable the pitch angles for the SCB grid
+    scb_pa = relabel_pitchangle(ramscb)
+
+    # compute the SCB flux at the equator
+    scb_flux_eq = interpolate_RAM_flux_to_SCB(ramscb, ispecies, 
+                                              scb_pa, ram_flux=Flux)
+
+    # get closest SCB grid-point for each RBSP satellite position
+    scb_coor_index = find_SM_point_SCB_grid(rbsp_sm_position, ramscb)
+
+    # get SCB grid-point coordinates
     scbx = numpy.array(ramscb['x'])
     scby = numpy.array(ramscb['y'])
     scbz = numpy.array(ramscb['z'])
 
-    # ----------------------------
-    #   get RAM grid coordinates to cartesian coordinates
-    # ----------------------------
+    # convert the SCB grid-points from 
+    # cartesian to spherical coordinates
+    scb_r, scb_lat, scb_lon \
+            = cartesian_to_spherical(scbx, scby, scbz)
 
-    # convert MLT to radians
-    rho = numpy.pi/12.0*ramscb_MLT - numpy.pi/2.0
+    # convert the RBSP satellite position from 
+    # cartesian to spherical coordinates
+    rbsp_r, rbsp_lat, rbsp_lon \
+            = cartesian_to_spherical(rbsp_sm_position[:,0],
+                                     rbsp_sm_position[:,1],
+                                     rbsp_sm_position[:,2])
 
-    X = numpy.zeros((ramscb['nT'].shape[0],ramscb['nR'].shape[0]),dtype=float)
-    Y = numpy.zeros((ramscb['nT'].shape[0],ramscb['nR'].shape[0]),dtype=float)
+    # ------------------------------
+    #   loop over the RBSP positions
+    # ------------------------------
 
-    # convert to cartesian
-    for j,L in enumerate(ramscb_Lshell):
-        for i,r in enumerate(rho):
-            X[i,j] = L*numpy.cos(r)
-            Y[i,j] = L*numpy.sin(r)
+    # initialize the interpolated flux array
+    ramscb_rbsp_flux = numpy.zeros((rbsp_sm_position.shape[0],nE,nPA),
+                                    dtype=float)
 
-    # reshape array for KD tree function
-    ram_grid = numpy.array([X.flatten(),Y.flatten()]).T
+    # satellite position loop
+    for idx_rbsp in numpy.arange(rbsp_sm_position.shape[0]):
 
-    # get KD tree object
-    ram_kdtree = spatial.KDTree(ram_grid)
+        # create tuple for indexing
+        idx = tuple(scb_coor_index[idx_rbsp,:])
 
-    # main for loop to from the satellite SM coordinate location
-    for idx_rbsp in scb_coor_index:
+        # initialize the SCB domain flag
+        in_SCB_domain = True
 
-        # convert indexes to tuple
-        idx = tuple(idx_rbsp)
+        # find enclosing longitude angle
+        if (rbsp_lon[idx_rbsp] <= scb_lon[idx]):
+            idx_lon_0 = idx[0]-1
+            idx_lon_1 = idx[0]
+        else:
+            if (idx[0] < scb_lon.shape[0]-1):
+                idx_lon_0 = idx[0]
+                idx_lon_1 = idx[0]+1
+            else:
+                idx_lon_0 = idx[0]
+                idx_lon_1 = 1
 
-        # ----------------------------
-        # get SCB grid coordinates that are on the equatorial plane
-        # ----------------------------
+        # find enclosing radius
+        if (rbsp_r[idx_rbsp] <= scb_r[idx]):
+            if (idx[1] > 1):
+                idx_r_0 = idx[1]-1
+                idx_r_1 = idx[1]
+            else:
+                print('satellite point in inner boundary of SCB grid, skipping')
+                print('closest SCB grid-point radius '+str(scb_r[idx].value))
+                in_SCB_domain = False
+        else:
+            if (idx[1] < scbx.shape[1]-1):
+                idx_r_0 = idx[1]
+                idx_r_1 = idx[1]+1
+            else:
+                print('satellite point in outer boundary of SCB grid, skipping')
+                print('closest SCB grid-point radius '+str(scb_r[idx].value))
+                in_SCB_domain = False
 
-        # find the SCB grid-point that is closest to the equator
-        idx_scb_min_z = numpy.argmin(numpy.abs(scbz[idx[0],idx[1],:]))
+        # find enclosing latitude angle
+        if (rbsp_lat[idx_rbsp] <= scb_lat[idx]):
+            if (idx[2] > 1):
+                idx_lat_0 = idx[2]-1
+                idx_lat_1 = idx[2]
+            else:
+                print('satellite point in outer boundary of SCB grid, skipping')
+                print('closest SCB grid-point radius '+str(scb_r[idx].value))
+                in_SCB_domain = False
+        else:
+            if (idx[2] < scb_lat.shape[2]-1):
+                idx_lat_0 = idx[2]
+                idx_lat_1 = idx[2]+1
+            else:
+                print('satellite point in outer boundary of SCB grid, skipping')
+                print('closest SCB grid-point radius '+str(scb_r[idx].value))
+                in_SCB_domain = False
 
-        # equatorial SCB grid-point along the magnetic field line that is
-        # closest to the satellite location
-        idx_scb_eq = tuple((idx[0],idx[1],idx_scb_min_z))
+        # proceed to interpolation if the grid-point 
+        # is inside the valid SCB mesh domain
+        if in_SCB_domain:
+            # form the cube of the surrounding SCB grid-points for 
+            # the RBSP satellite position
+            cube = []
+            cube.append(numpy.array([idx_lon_0,idx_r_0,idx_lat_0]))
+            cube.append(numpy.array([idx_lon_0,idx_r_0,idx_lat_1]))
+            cube.append(numpy.array([idx_lon_0,idx_r_1,idx_lat_0]))
+            cube.append(numpy.array([idx_lon_0,idx_r_1,idx_lat_1]))
+            cube.append(numpy.array([idx_lon_1,idx_r_0,idx_lat_0]))
+            cube.append(numpy.array([idx_lon_1,idx_r_0,idx_lat_1]))
+            cube.append(numpy.array([idx_lon_1,idx_r_1,idx_lat_0]))
+            cube.append(numpy.array([idx_lon_1,idx_r_1,idx_lat_1]))
+            cube = numpy.array(cube)
 
-        # get x and y coordinates for the equatorial SCB grid-point
-        scb_eq_x = scbx[idx_scb_eq]
-        scb_eq_y = scby[idx_scb_eq]
+            # ------------------------------
+            #   interpolate the flux to 
+            #   the RBSP satellite position
+            # ------------------------------
 
-        # ----------------------------
-        # get RAM grid coordinates that are the closest to the SCB gridpoint
-        # ----------------------------
+            # get x, y, z coordinates for cube
+            cube_xyz = []
+            for c in cube:
+                idx_cube = tuple(c)
+                cube_xyz.append( numpy.array([scbx[idx_cube],
+                                              scby[idx_cube],
+                                              scbz[idx_cube]]) )
+            cube_xyz = numpy.array(cube_xyz)
 
-        # get the 10 closes RAM spatial grid-point for the SCB grid-point at
-        # the equator
-        dist, idx_ram_scb = ram_kdtree.query(numpy.array([scb_eq_x,scb_eq_y]),10)
+            # get x, y, z coordinates for RBSP
+            rbsp_xyz = numpy.array([rbsp_sm_position[idx_rbsp,0],
+                                    rbsp_sm_position[idx_rbsp,1],
+                                    rbsp_sm_position[idx_rbsp,2]])
 
-        pdb.set_trace()
+            # get the flux at the SCB grid-point
+            scb_flux_cube = interpolate_off_equator_SCB_flux(ramscb, 
+                                                             scb_flux_eq, 
+                                                             scb_pa, cube)
 
-        # unravel index for 2-D arrays
-        idx_ram_scb_xy = []
-        for ii in idx_ram_scb:
-            idx_ram_scb_xy.append(numpy.unravel_index(ii,X.shape))
+            # interpolate to satellite location
+            points = numpy.copy(cube_xyz)
+            xi = numpy.copy(rbsp_xyz)
+            for iE in numpy.arange(nE):
+                for iPA in numpy.arange(nPA):
+                    values = scb_flux_cube[:,iE,iPA]
+                    ramscb_rbsp_flux[idx_rbsp,iE,iPA] = \
+                            interpolate.griddata(points,values,xi)
 
-# -----------------------------------------------------------------
-#       compute flux from RAM-SCB restart files
-# -----------------------------------------------------------------
-
-### def process_observations(filename,species,Lshell,MLT,energy,pitch_angle):
-### 
-###     '''
-###     Parameters
-###     ==========
-###         filename : string
-###             name, including path, of the RBSP observation level 3 files. These
-###             files should include the proton and electron derived fluxes.
-###         species : dictionary
-###             dictionary with species name from RAM-SCBE
-###         Lshell : numpy array
-###             array with Lshell values used in the RAM-SCBE grid.
-###             'nR'
-###         MLT : numpy array
-###             array with local magnetic time use in the RAM-SCBE grid.
-###         energy : numpy array
-###             array with energy bins use in the RAM-SCBE grid.
-###         pitch_angle : numpy array
-###             array with pitch angle's use in the RAM-SCBE grid.
-### 
-###     Returns
-###     =======
-###         rbsp_dates : datetime numpy array
-###             dates for RBSP observations
-###         rbsp_pitch_angle : numpy array
-###             pitch angle for RBSP observations
-###         rbsp_energy : numpy array
-###             energy for RBSP observations
-###         rbsp_flux : numpy array
-###             flux from RBSP observations
-###         rbsp_oflux : numpy array
-###             computed omnidirectional flux for RBSP level 3 derived fluxes
-###         H : numpy array
-###             observation operator for assimilation
-### 
-###     Description
-###     ===========
-###     This routine processes the RBSP observations to compute the omnidirectional flux observed from the level 3 derived proton or electron fluxes. The routine also estimates what is the observation operator H for the data assimilation algorithm.
-### 
-###     Examples
-###     ========
-### 
-###     >>> filename = 'ram-scbe-restart-file-name.nc'
-###     >>> species,Lshell,MLT,energy,pitch_angle,Flux = compute_restart_flux(filename)
-###     >>> filename = 'rbspa_rel04_ect-mageis-L3_20170907_v8.4.0.cdf'
-###     >>> rbsp_dates,rbsp_pitch_angle,rbsp_energy,rbsp_flux,rbsp_oflux,H = 
-###     >>>         process_observations(filename,species,Lshell,MLT,energy,pitch_angle)
-### 
-###     '''
-### 
-###     # ----------------------------
-###     #       read data
-###     # ----------------------------
-### 
-###     # read RBSP data file
-###     rbsp = pycdf.CDF(filename)
-### 
-###     # ----------------------------
-###     #   get energy and pitch angles
-###     # ----------------------------
-### 
-###     # get number of valid pitch angles
-###     PitchAngle = rbsp['FPDU_Alpha'][:]
-###     idx_PA = numpy.where(PitchAngle >= 0.0)[0]
-###     rbsp_pitch_angle = PitchAngle[idx_PA]
-### 
-###     # get valid Energy spectrum
-###     Energy = rbsp['FPDU_Energy'][:]
-###     idx_E = numpy.where(Energy >= 0.0)[0]
-###     rbsp_energy = Energy[idx_E]
-### 
-###     rbsp_L = rbsp['L']
-### 
-###     rbsp_MLT = rbsp['MLT']
-### 
-###     # ----------------------------
-###     #   get dates
-###     # ----------------------------
-### 
-###     rbsp_dates = rbsp['FPDU_Epoch'][:]
-### 
-###     # -------------------------
-###     #   get valid flux for RBSP-A
-###     # -------------------------
-### 
-###     # first filter out the invalid values
-###     rbsp_flux = rbsp['FPDU'][:]
-###     rbsp_flux = rbsp_flux[:,idx_PA,:]
-###     rbsp_flux = rbsp_flux[:,:,idx_E]
-### 
-###     # -------------------------
-###     #   interpolate to closest model grid-point
-###     # -------------------------
-### 
-###     # get number of grid-points for RBSP obs
-###     Ndates = rbsp_dates.shape[0]
-###     NE = rbsp_energy.shape[0]
-###     NPA = rbsp_pitch_angle.shape[0]
-### 
-###     # get number of grid-points for RAM-SCB
-###     NS_model = len(species)
-###     NL_model = Lshell.shape[0]
-###     NMLT_model = MLT.shape[0]
-###     NE_model = energy.shape[0]
-###     NPA_model = pitch_angle.shape[0]
-### 
-###     # initialize observation operator array
-###     obs_to_model_grid = numpy.zeros((NL_model,
-###         NMLT_model,NE_model,NPA_model),dtype=int)
-### 
-###     # initialize observation array
-###     obs = []
-### 
-###     # initialize observations coordinates array
-###     obs_coordinates = []
-### 
-###     # initialize observations dates array
-###     obs_dates = []
-### 
-###     # initialize number of observations in model grid-point
-###     number_obs_model_grid = []
-### 
-###     # initialize observation counter
-###     iobs = 0
-###     for idate in numpy.arange(Ndates):
-###         for iE in numpy.arange(NE):
-###             for iPA in numpy.arange(NPA):
-###                 if ( rbsp_pitch_angle[iPA] < numpy.max(pitch_angle) and
-###                         rbsp_energy[iE] < numpy.max(energy) ):
-###                     if (rbsp_flux[idate,iPA,iE] > 0.0):
-### 
-###                         # find index in model array
-###                         idx_L = numpy.argmin(numpy.abs(Lshell-rbsp_L[idate]))
-###                         idx_MLT = numpy.argmin(numpy.abs(MLT-rbsp_MLT[idate]))
-###                         idx_energy = numpy.argmin(numpy.abs(energy-rbsp_energy[iE]))
-###                         idx_pitch_angle = numpy.argmin(numpy.abs(pitch_angle-rbsp_pitch_angle[iPA]))
-### 
-###                         if (obs_to_model_grid[idx_L,idx_MLT,idx_energy,idx_pitch_angle] > 0):
-### 
-###                             pdb.set_trace()
-### 
-###                             # there is already an observation available at the grid-point, sum up to take the average 
-###                             obs_idx = obs_to_model_grid[idx_L,idx_MLT,idx_energy,idx_pitch_angle]
-###                             obs[obs_idx] = obs[obs_idx] + rbsp_flux[idate,iPA,iE]
-###                             number_obs_model_grid[obs_idx] = number_obs_model_grid[obs_idx]+1.0
-### 
-###                         else:
-### 
-###                             # append the observation
-###                             obs.append(rbsp_flux[idate,iPA,iE])
-### 
-###                             # append the observation coordinate
-###                             coord = numpy.array([rbsp_L[idate], rbsp_MLT[idate],
-###                                 rbsp_energy[iE], rbsp_pitch_angle[iPA]])
-###                             obs_coordinates.append(coord)
-### 
-###                             # append the observation date
-###                             obs_dates.append(rbsp_dates[idate])
-### 
-###                             # get obs index
-###                             obs_to_model_grid[idx_L,idx_MLT,idx_energy,idx_pitch_angle] = iobs
-###                             # get number of observations in the current grid
-###                             number_obs_model_grid.append(1.0)
-### 
-###                             # increase counter
-###                             iobs = iobs+1
-
-# -----------------------------------------------------------------
-#       compute observation operator
-# -----------------------------------------------------------------
-
-def get_observation_operator(
-        species,ramscb_Lshell,ramscb_MLT,ramscb_energy,ramscb_pitch_angle,ramscb_flux,
-        satobs_Lshell,satobs_MLT,satobs_energy,satobs_pitch_angle,satobs_flux):
-
-    # -------------------------
-    #   we are assuming the the dimensions of the satellite observations are as
-    #   follows:
-    #       satobs(dates,pitch_angle,energy)
-    # -------------------------
-
-    # -------------------------
-    #   get dimensions from observations
-    # -------------------------
-
-    # number of observation dates within the given time interval
-    Ndates = satobs_flux.shape[0]
-
-    # valid energy ranges
-    idx0 = numpy.where(satobs_energy >= numpy.min(ramscb_energy))[0]
-    idx1 = numpy.where(satobs_energy <= numpy.max(ramscb_energy))[0]
-    idxE = numpy.intersect1d(idx0,idx1)
-    valid_satobs_energy = satobs_energy[idxE]
-
-    # valid energy ranges
-    idx0 = numpy.where(satobs_pitch_angle >= numpy.min(ramscb_pitch_angle))[0]
-    idx1 = numpy.where(satobs_pitch_angle <= numpy.max(ramscb_pitch_angle))[0]
-    idxPA = numpy.intersect1d(idx0,idx1)
-    valid_satobs_pitch_angle = satobs_pitch_angle[idxPA]
-
-    # get valid sat obs
-    valid_satobs_flux = satobs_flux[:,:,idxE]
-    valid_satobs_flux = valid_satobs_flux[:,idxPA,:]
-
-    # initialize the array
-    satobs_OF = numpy.zeros((Ndates,valid_satobs_energy.shape[0]),dtype=float)
-
-    # -------------------------
-    #   compute omnidirectional flux
-    # -------------------------
-
-    for iobs,obs_flux in enumerate(valid_satobs_flux):
-
-        # identify index in L-shell
-        idx_L = numpy.argmin(numpy.abs(ramscb_Lshell-satobs_Lshell[iobs]))
-
-        # get index for closest ram-scb MLT
-        idx_MLT = numpy.argmin(numpy.abs(ramscb_MLT-satobs_MLT[iobs]))
-
-        for iE,E in enumerate(valid_satobs_energy):
-
-            idx_valid_flux = numpy.where(valid_satobs_flux[iobs,:,iE] > 0.0)[0]
-
-            if len(idx_valid_flux) > 1:
-
-                # get index for closest ram-scb MLT
-                idx_E = numpy.argmin(numpy.abs(ramscb_energy-E)) 
-
-                # initialize PA array
-                model_to_obs_pitch_angle = []
-
-                # loop over the pitch angle
-                for iPA,PA in enumerate(valid_satobs_pitch_angle):
-
-                    # get index for closest ram-scb MLT
-                    idx_PA = numpy.argmin(numpy.abs(ramscb_pitch_angle-PA)) 
-                    model_to_obs_pitch_angle.append(idx_PA)
-
-                # convert to numpy array
-                model_to_obs_pitch_angle = numpy.array(model_to_obs_pitch_angle)
-                model_to_obs_pitch_angle = numpy.unique(model_to_obs_pitch_angle)
-                
-                # -------------------------
-                # integrate over the pitch angle for omnidirectional flux
-                # -------------------------
-
-                # compute delta in pitch angle
-                dx = valid_satobs_pitch_angle[1:]-valid_satobs_pitch_angle[:-1]
-                dx = numpy.pi/180.0*dx
-
-                # form the function to integrate
-                f = numpy.sin(numpy.pi/180.0*valid_satobs_pitch_angle)
-                f = f*valid_satobs_flux[iobs,:,iE]
-
-                pdb.set_trace()
-                tmpx = numpy.pi/180.0*valid_satobs_pitch_angle
-                tmp = integrate.cumtrapz(f,tmpx)[-1]
-
-                f[0] = 1.0/2.0*dx[0]*f[0]
-                for k in numpy.arange(1,valid_satobs_pitch_angle.shape[0]-1):
-                    f[k] = 1.0/2.0*(dx[k-1]+dx[k])*f[k]
-                f[-1] = 1.0/2.0*dx[-1]*f[-1]
-
-                integral_trapezoid = numpy.sum(f)
-
-                pdb.set_trace()
-
-    return Ndates
-
+    return ramscb_rbsp_flux
 
 # -----------------------------------------------------------------
 #       interpolate the ramscb omnidirectional flux to RBSP omni. flux
@@ -1782,3 +1707,159 @@ def interpolate_omnidirectional_flux(ramscb_Lshell,ramscb_MLT,ramscb_energy,rams
         # ---------------------------
 
     return interpolated_OF
+
+
+# -----------------------------------------------------------------
+#       read RAM-SCB input omni file
+# -----------------------------------------------------------------
+
+def read_ramscb_omni(paramfilename,omnifile=None):
+
+    # load the RAM-SCB PARAM.in input file
+    params = rampy.ParamFile(paramfilename)
+
+    # get OMNI file name
+    omnifile = params.path + params['OMNIFILE'][0].split()[0]
+
+    # check if the SWMF flag is present for the OMNI file
+    swmfflag = False
+    if 'OMNIFILESOURCE' in params:
+        swmfflag = params['OMNIFILESOURCE'][0].split()[0]
+        if swmfflag.upper() == 'T':
+            swmfflag = True
+
+    # read all lines of OMNI file
+    fh = open(omnifile,'r')
+    lines = fh.readlines()
+    fh.close()
+
+
+    # read until there is a #START
+    if swmfflag:
+        for iline,line in enumerate(lines):
+            if line.find('START') >= 0:
+                startdata = iline+1
+                break
+    else:
+        startdata = 0
+
+    # get only the data lines
+    datalines = lines[startdata:]
+
+    # get the data as a numpy array
+    omnidata = numpy.loadtxt(datalines)
+
+    # separate the data
+    bx = omnidata[:,7]
+    by = omnidata[:,8]
+    bz = omnidata[:,9]
+    vx = omnidata[:,10]
+    vy = omnidata[:,11]
+    vz = omnidata[:,12]
+    rho = omnidata[:,13]
+    temperature = omnidata[:,14]
+
+    # convert dates to datetime object
+    dates = []
+    for line in datalines:
+        line = line[:19]
+        dtime = datetime.datetime.strptime(line,"%Y %m %d %H %M %S")
+        dates.append(dtime)
+    dates = numpy.array(dates)
+
+    # create dictionary
+    ramscb_omni = {'time': dates,
+            'bx': bx,
+            'by': by,
+            'bz': bz,
+            'vx': vx,
+            'vy': vy,
+            'vz': vz,
+            'rho': rho,
+            'temp': temperature}
+
+    return ramscb_omni
+
+def plot_ramscb_omni(ramscb_omni, omni_label=[], date_range=[]):
+
+    # -----------------------------
+    #       set up figure
+    # -----------------------------
+
+    if len(date_range) > 0:
+
+        # set start and stop dates
+        t0 = date_range[0]
+        tN = date_range[1]
+
+        # get time array
+        dates = ramscb_omni['time']
+
+        # filter out the dates
+        idx0 = numpy.where(dates>=t0)[0]
+        idxN = numpy.where(dates<=tN)[0]
+        idx_dates = numpy.intersect1d(idx0,idxN)
+
+    else:
+
+        # get time array
+        dates = ramscb_omni['time']
+        idx_dates = numpy.arange(len(dates))
+
+
+    if len(omni_label) == 0:
+
+        # default to all labels
+        omni_label = ['bx', 'by', 'bz', 'vx', 'vy',
+                      'vz', 'rho', 'temp']
+
+        # get number of plots
+        nplots = len(omni_label)
+
+    else:
+
+        # get number of plots
+        nplots = len(omni_label)
+
+    # get the number of rows and columns of the plots
+    if (nplots >=2):
+        ncols = 2
+        nrows = math.ceil(nplots/ncols)
+    else:
+        ncols = 1
+        nrows = 1
+
+    # set figure size
+    fig_size=(18.0,15.0)
+
+    # set up parameters
+    params = {
+                'backend': 'ps',
+                'font.size' : 20,
+                'axes.labelsize': 15,
+                'xtick.labelsize': 15,
+                'ytick.labelsize': 15,
+                'legend.fontsize': 18,
+                'text.usetex': True,
+                'figure.figsize': fig_size
+             }
+
+    # set up subplot figure
+    pylab.rcParams.update(params)
+
+    fig = pylab.figure()
+    fig.subplots_adjust(top=0.96,bottom=0.05,hspace=0.35,wspace=0.20,
+                                left=0.08, right=0.95)
+
+    # -----------------------------
+    #       do the plots
+    # -----------------------------
+
+    for ilabel,label in enumerate(omni_label):
+
+        ax = fig.add_subplot(nrows,ncols,ilabel+1)
+        ax.plot(dates[idx_dates],
+                ramscb_omni[label][idx_dates],
+                'b-',linewidth=2)
+        rampy.applySmartTimeTicks(ax,dates[idx_dates])
+        ax.set_title(label)
