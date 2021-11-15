@@ -368,7 +368,7 @@ def compute_restart_flux_old(filename):
 #       compute RAM-SCB omnidirectional flux
 # -----------------------------------------------------------------
 
-def compute_omnidirectional_flux(species,Lshell,MLT,energy,pitch_angle,Flux):
+def compute_omnidirectional_flux_ramscb(species,Lshell,MLT,energy,pitch_angle,Flux):
 
     '''
     Parameters
@@ -453,6 +453,84 @@ def compute_omnidirectional_flux(species,Lshell,MLT,energy,pitch_angle,Flux):
         ramscb_OF[iS,iL,iMLT,iE] = 2.0*numpy.pi*integrate.cumtrapz(y,x)[-1]
 
     return ramscb_OF
+
+# -----------------------------------------------------------------
+#       compute omnidirectional flux
+# -----------------------------------------------------------------
+
+def compute_omnidirectional_flux(energy,pitch_angle,flux):
+
+    '''
+    Parameters
+    ==========
+        energy : numpy array
+            array with energy bins
+        pitch_angle : numpy array
+            array with pitch angle
+        flux : numpy array
+            flux to use for computing omnidirectional flux, this array has
+            dimensions (NE,NPA), where NE is the number of energy bints, and
+            NPA is the number of pitch angle bins
+
+    Returns
+    =======
+        ramscb_OF : numpy array
+            computed omnidirectional flux
+
+    Description
+    ===========
+    This routine computes the omnidirectional flux for all species given in the
+    Flux array. The omnidirectional flux is computed using the following
+    formula:
+                 
+       OF = 2*pi \int{ J(\alpha) \sin{\alpha} } d \alpha,
+    
+    where J(\alpha) is the flux at the pitch angle \alpha.
+
+    Examples
+    ========
+
+    >>> filename = 'ram-scbe-restart-file-name.nc'
+    >>> species,Lshell,MLT,energy,pitch_angle,Flux = compute_restart_flux(filename)
+    >>> ramscb_OF = compute_omnidirectional_flux(species,Lshell,MLT,energy,pitch_angle,Flux)
+
+    '''
+
+    # ----------------------------
+    #   get variables
+    # ----------------------------
+
+    NE = energy.shape[0]
+    NPA = pitch_angle.shape[0]
+
+    # ----------------------------
+    #   compute omnidirectional flux
+    # ----------------------------
+    # the omnidirectional flux is computed using the following formula:
+    #             
+    #   OF = 2*pi \int{ J(\alpha) \sin{\alpha} } d \alpha,
+    #
+    # where J(\alpha) is the flux at the pitch angle \alpha. The omnidirectional
+    # flux will be compute for each energy and L-shell
+
+    omnidirectional_flux = numpy.zeros(NE,dtype=float)
+
+    # iterative loop for the flux
+    for iE in numpy.arange(NE):
+
+        # get x and y for the integral
+        x = numpy.pi/180.0*pitch_angle
+        y = numpy.sin(x)*flux[iE,:]
+
+        # reorder from smallest to biggest
+        idx = x.argsort()
+        x = x[idx]
+        y = y[idx]
+
+        # compute integral
+        omnidirectional_flux[iE] = 2.0*numpy.pi*integrate.cumtrapz(y,x)[-1]
+
+    return omnidirectional_flux
 
 # -----------------------------------------------------------------
 #       compute RBSP omnidirectional flux
@@ -1305,9 +1383,7 @@ def interpolate_off_equator_SCB_flux(ramscb, scb_flux_eq, scb_pa,
 #       from the RBSP satellite position
 # -----------------------------------------------------------------
 
-def interpolate_flux_RAMSCB_RBSP(ramscb, rbsp, rbsp_ephem,
-                                 start=None, stop=None, 
-                                 ispecies=0, Delauney=False):
+def interpolate_flux_RAMSCB_Satellite(ramscb, satellite_sm_location, ispecies=0):
     '''
     Parameters
     ==========
@@ -1343,23 +1419,6 @@ def interpolate_flux_RAMSCB_RBSP(ramscb, rbsp, rbsp_ephem,
     >>> ramscb_rbsp_flux = ramscb_da.interpolate_flux_RAMSCB_RBSP(ramscb,rbsp,rbsp_ephem)
     '''
 
-    if (start and stop):
-
-        # check that dates are correct
-        if (start > stop):
-            raise ValueError('start must be earlier than stop dates')
-
-        # get SM coordinates of the RBSP satellite location
-        rbsp_dates = numpy.array(rbsp['Epoch'])
-        rbsp_sm_position = get_SM_RBSP(rbsp_dates, rbsp_ephem, 
-                                       start=start, stop=stop)
-
-    else:
-
-        # get SM coordinates of the RBSP satellite location
-        rbsp_dates = numpy.array(rbsp['Epoch'])
-        rbsp_sm_position = get_SM_RBSP(rbsp_dates, rbsp_ephem)
-
     # compute the RAM flux and get all information
     species, Lshell, MLT, energy,\
             pitch_angle, Flux = compute_restart_flux(ramscb)
@@ -1376,7 +1435,7 @@ def interpolate_flux_RAMSCB_RBSP(ramscb, rbsp, rbsp_ephem,
                                               scb_pa, ram_flux=Flux)
 
     # get closest SCB grid-point for each RBSP satellite position
-    scb_coor_index = find_SM_point_SCB_grid(rbsp_sm_position, ramscb)
+    scb_coor_index = find_SM_point_SCB_grid(satellite_sm_location, ramscb)
 
     # get SCB grid-point coordinates
     scbx = numpy.array(ramscb['x'])
@@ -1391,147 +1450,137 @@ def interpolate_flux_RAMSCB_RBSP(ramscb, rbsp, rbsp_ephem,
     # ------------------------------
 
     # initialize the interpolated flux array
-    ramscb_rbsp_flux = -1.0*numpy.ones((rbsp_sm_position.shape[0],nE,nPA),
+    ramscb_satellite_flux = -1.0*numpy.ones((satellite_sm_location.shape[0],nE,nPA),
                                     dtype=float)
 
-    if Delauney:
-        # get Delaunay triangulation (could be more simple?)
-        scb_Delaunay = spatial.Delaunay(scb_coord)
+    # ---------------------------------------------
+    #       Define a local stencil
+    # ---------------------------------------------
+
+    # initialize the RAM-SCB coordinate index for the interpolation
+    ramscb_coordinate_index = []
 
     # satellite position loop
-    for idx_rbsp in numpy.arange(rbsp_sm_position.shape[0]):
+    for idx_satellite in numpy.arange(satellite_sm_location.shape[0]):
 
         # create tuple for indexing
-        idx = tuple(scb_coor_index[idx_rbsp,:])
+        idx = tuple(scb_coor_index[idx_satellite,:])
 
-        # use Delauney tesellation for accuracy
-        if Delauney:
+        idx_s = numpy.array([-1,0,1])
 
-            # find the trianbulation that contains the RBSP position
-            # this will provide the index of the simplex that defines the triangulation
-            idx_s = scb_Delaunay.find_simplex(rbsp_sm_position[idx_rbsp])
+        # get stencil
+        for i in numpy.arange(3):
+            for j in numpy.arange(3):
+                for k in numpy.arange(3):
 
-            # interpolate if inside triangulation
-            if (idx_s >= 0):
+                    # initialize the SCB domain flag
+                    in_SCB_domain = True
 
-                # get the indexes for the triangulation
-                idx_s_simplex = scb_Delaunay.simplices[idx_s]
+                    # set index
+                    idx_x = idx[0]+idx_s[i]
+                    idx_y = idx[1]+idx_s[j]
+                    idx_z = idx[2]+idx_s[k]
 
-                # get the coordinates of the triangle
-                scb_coord_triangle = scb_coord[idx_s_simplex,:]
+                    # set limits along the longitude
+                    if (idx_x > scbx.shape[0]-1):
+                        idx_x = 1
+                    if (idx_x < 0):
+                        idx_x = scbx.shape[0]-2
 
-                # get the indexes of the triangle in SCB grid
-                triangle = []
-                for idx_triangle in idx_s_simplex:
-                    iidx = numpy.unravel_index(idx_triangle,scbx.shape)
-                    iidx = numpy.array(iidx)
-                    triangle.append(iidx)
-                triangle = numpy.array(triangle)
-                
-                # ------------------------------
-                #   interpolate the flux to 
-                #   the RBSP satellite position
-                # ------------------------------
+                    # see if within the radius
+                    if ( (idx_y > scby.shape[1]-1) or
+                         (idx_y <= 1)   ):
+                        in_SCB_domain = False
 
-                # compute the flux on the SCB points
-                scb_flux_triangle = interpolate_off_equator_SCB_flux(ramscb, scb_flux_eq, 
-                                                                 scb_pa, triangle)
+                    # see if wthin the magnetic field
+                    if ( (idx_z > scbz.shape[2]-1) or
+                         (idx_z < 0)   ):
+                        in_SCB_domain = False
 
-                # define the targe point in space
-                rbsp_xyz = numpy.array([rbsp_sm_position[idx_rbsp,0],
-                                        rbsp_sm_position[idx_rbsp,1],
-                                        rbsp_sm_position[idx_rbsp,2]])
+                    if in_SCB_domain:
 
-                # initialize the flux array
-                flux_ramscb_rbsp = numpy.zeros((nE,nPA),dtype=float)
+                        ramscb_coordinate_index.append(numpy.array([idx_x,idx_y,idx_z]))
 
-                # interpolate to satellite location
-                points = numpy.copy(scb_coord_triangle)
-                xi = numpy.copy(rbsp_xyz)
-                for iE in numpy.arange(nE):
-                    for iPA in numpy.arange(nPA):
-                        values = scb_flux_triangle[:,iE,iPA]
-                        ramscb_rbsp_flux[idx_rbsp,iE,iPA] = \
-                                interpolate.griddata(points,values,xi)
+    # convert to numpy array
+    ramscb_coordinate_index = numpy.array(ramscb_coordinate_index)
 
-        # use weighted nearest neighbor
-        else:
+    # only consider unique entries of the array
+    tmp_index = []
+    for i_index in ramscb_coordinate_index:
+        tmp_index.append(numpy.ravel_multi_index(tuple(i_index),scbx.shape))
+    tmp_index = numpy.array(tmp_index)
+    tmp_index = numpy.unique(tmp_index)
+
+    # get unique entries in the RAM-SCB grid (unravel)
+    ramscb_coordinate_index = []
+    for i,i_index in enumerate(tmp_index):
+        ramscb_coordinate_index.append(
+                tuple(numpy.unravel_index(i_index,scbx.shape)))
+
+    # get SCB grid-points into single 3D array
+    scb_coord = []
+    for i,index in enumerate(ramscb_coordinate_index):
+        scb_coord.append(numpy.array([scbx[index],scby[index],scbz[index]]))
+    scb_coord = numpy.array(scb_coord)
+
+    # get Delaunay triangulation (could be more simple?)
+    scb_Delaunay = spatial.Delaunay(scb_coord)
+
+    # ---------------------------------------------
+    #       find all the triangles that contain each satellite location
+    # ---------------------------------------------
+
+    # initialize the interpolated flux array
+    ramscb_satellite_flux = -1.0*numpy.ones((satellite_sm_location.shape[0],
+                                             nE,nPA), dtype=float)
+
+    # satellite position loop
+    for idx_satellite in numpy.arange(satellite_sm_location.shape[0]):
+
+        # find the trianbulation that contains the RBSP position
+        # this will provide the index of the simplex that defines the triangulation
+        idx_s = scb_Delaunay.find_simplex(satellite_sm_location[idx_satellite])
+
+        # interpolate if inside triangulation
+        if (idx_s >= 0):
+
+            # get the indexes for the triangulation
+            idx_s_simplex = scb_Delaunay.simplices[idx_s]
+
+            # get the coordinates of the triangle
+            scb_coord_triangle = scb_coord[idx_s_simplex,:]
+
+            # get the indexes of the triangle in SCB grid
+            triangle = []
+            for idx_triangle in idx_s_simplex:
+                triangle.append(numpy.array(ramscb_coordinate_index[idx_triangle]))
+            triangle = numpy.array(triangle)
+            
+            # ------------------------------
+            #   interpolate the flux to 
+            #   the RBSP satellite position
+            # ------------------------------
+
+            # compute the flux on the SCB points
+            scb_flux_triangle = interpolate_off_equator_SCB_flux(ramscb, scb_flux_eq, 
+                                                             scb_pa, triangle)
+
+            # define the target point in space
+            satellite_xyz = numpy.array([satellite_sm_location[idx_satellite,0],
+                                         satellite_sm_location[idx_satellite,1],
+                                         satellite_sm_location[idx_satellite,2]])
+
+            # interpolate to satellite location
+            points = numpy.copy(scb_coord_triangle)
+            xi = numpy.copy(satellite_xyz)
+            for iE in numpy.arange(nE):
+                for iPA in numpy.arange(nPA):
+                    values = scb_flux_triangle[:,iE,iPA]
+                    ramscb_satellite_flux[idx_satellite,iE,iPA] = \
+                            interpolate.griddata(points,values,xi)
 
 
-            # initialize the index array
-            idx_stencil = []
-
-            idx_s = numpy.array([-1,0,1])
-
-            # get stencil
-            for i in numpy.arange(3):
-                for j in numpy.arange(3):
-                    for k in numpy.arange(3):
-
-                        # initialize the SCB domain flag
-                        in_SCB_domain = True
-
-                        # set index
-                        idx_x = idx[0]+idx_s[i]
-                        idx_y = idx[1]+idx_s[j]
-                        idx_z = idx[2]+idx_s[k]
-
-                        # set limits along the longitude
-                        if (idx_x > scbx.shape[0]-1):
-                            idx_x = 1
-                        if (idx_x < 0):
-                            idx_x = scbx.shape[0]-2
-
-                        # see if within the radius
-                        if ( (idx_y > scby.shape[1]-1) or
-                             (idx_y <= 1)   ):
-                            in_SCB_domain = False
-
-                        # see if wthin the magnetic field
-                        if ( (idx_z > scbz.shape[2]-1) or
-                             (idx_z < 0)   ):
-                            in_SCB_domain = False
-
-                        if in_SCB_domain:
-
-                            idx_stencil.append(numpy.array([idx_x,idx_y,idx_z]))
-
-            # convert to numpy array
-            idx_stencil = numpy.array(idx_stencil)
-
-            # check if there are any points in the stencil
-            if (len(idx_stencil) > 0):
-
-                # get the coordinates for the stencil
-                scb_coord_stencil = []
-                for stencil in idx_stencil:
-                    stencil = tuple(stencil)
-                    scb_coord_stencil.append( numpy.array([scbx[stencil],
-                                                           scby[stencil],
-                                                           scbz[stencil]]) )
-                scb_coord_stencil = numpy.array(scb_coord_stencil)
-
-                # compute the flux on the SCB points
-                scb_flux_stencil = interpolate_off_equator_SCB_flux(ramscb, scb_flux_eq, 
-                                                                 scb_pa, idx_stencil)
-                # define the targe point in space
-                rbsp_xyz = numpy.array([rbsp_sm_position[idx_rbsp,0],
-                                        rbsp_sm_position[idx_rbsp,1],
-                                        rbsp_sm_position[idx_rbsp,2]])
-
-                # initialize the flux array
-                flux_ramscb_rbsp = numpy.zeros((nE,nPA),dtype=float)
-
-                # interpolate to satellite location
-                points = numpy.copy(scb_coord_stencil)
-                xi = numpy.copy(rbsp_xyz)
-                for iE in numpy.arange(nE):
-                    for iPA in numpy.arange(nPA):
-                        values = scb_flux_stencil[:,iE,iPA]
-                        ramscb_rbsp_flux[idx_rbsp,iE,iPA] = \
-                                interpolate.griddata(points,values,xi)
-
-    return ramscb_rbsp_flux
+    return ramscb_satellite_flux
 
 # -----------------------------------------------------------------
 #       interpolate the ramscb omnidirectional flux to RBSP omni. flux
