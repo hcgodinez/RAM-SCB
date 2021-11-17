@@ -4,8 +4,7 @@
 !============================================================================
 
 MODULE ModRamCoul
-! Contains subroutines for calculating energy and PA losses
-! due to Coulomb collisions
+! Contains subroutines for calculating energy and PA losses due to Coulomb collisions
 
   implicit none
 
@@ -22,7 +21,7 @@ MODULE ModRamCoul
     use ModRamGrids,     ONLY: NE, NR, NT, NPA, NS
     use ModRamTiming,    ONLY: DTs
     use ModRamVariables, ONLY: RMAS, species, VBND, V, GREL, COULE, COULI, ATA, &
-                           GTA, GTAE, GTAI, CEDR, CIDR, MU, WMU, DMU, EKEV, GRBND
+                               GTA, GTAE, GTAI, CEDR, CIDR, MU, WMU, DMU, EKEV, GRBND
     use ModRamSpecies,   ONLY: RAMSpecies, nSpecies
     use ModRamFunctions, ONLY: FUNT, FUNI, Gcoul, ERFF
 
@@ -48,7 +47,8 @@ MODULE ModRamCoul
 
 ! Proportions of species in plasmasphere
 !old    DATA RA/1.0,0.77,0.2,0.03/    ! e-, H+, He+, O+
-!        DATA RA/0.77,0.03,0.2,1.0/    ! H+, O+, He+, e- ! Moved to RAMSpecies
+!        DATA RA/0.77,0.03,0.2,1.0/    ! H+, O+, He+, e- 
+! These proportions were moved to RAMSpecies and can be edited there
 
 
 !...Parameters used in calculating Coulomb collisions
@@ -71,11 +71,11 @@ MODULE ModRamCoul
           Zb = RAMSpecies(iS)%s_charge                 ! |charge| of plasmasphere species
           X=VBND(S,K)/VF
           XD=V(S,K)/VF
-          if (Zb < 0._dp) then  ! electrions
+          if (Zb < 0._dp) then  ! Negative charge (electrons)
              CCE = CCE + RA*Gcoul(X)
              CDE = CDE + RA*(ERFF(XD)-Gcoul(XD))
              EDRE = EDRE + RA*Gcoul(XD)
-          else                  ! ions
+          else                  ! Non-negative charge (ions)
              CCI = CCI + RA*Zb**2*Gcoul(X)
              CDI = CDI + RA*Zb**2*(ERFF(XD)-Gcoul(XD))
              EDRI = EDRI + RA*Gcoul(XD)
@@ -169,8 +169,7 @@ MODULE ModRamCoul
            BANE(L)=BANE(L-1)
          END DO
         DO 1 L=2,NPA
-         XNE(I,J)=NECR(I,J)*BANE(L)                                ! assume n/B=const
-!         XNE(I,J)=NECR(I1,J1)*BANE(L)                                ! assume n/B=const, CRasm model
+         XNE(I,J)=NECR(I,J)*BANE(L)   ! assume n/B=const
           if (XNE(I,J) < 0._dp) then
               write(*,*) 'in COULEN XNE<0 ', T/3600, S,i,j,l, &
                    XNE(I,J),NECR(I,J),BANE(L)

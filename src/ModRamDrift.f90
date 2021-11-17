@@ -4,8 +4,7 @@
 !============================================================================
 
 MODULE ModRamDrift
-! Contains subroutines responsible for calculating flux changes due to
-! different drifts
+! Contains subroutines responsible for calculating flux changes due to different drifts
 
   use ModRamMain,      ONLY: Real8_
   use ModRamGrids,     ONLY: nR, nE, nPA
@@ -22,6 +21,7 @@ MODULE ModRamDrift
   contains
 !==============================================================================
   SUBROUTINE DRIFTEND
+    ! Deallocates arrays needed for drift equations
 
     implicit none
     
@@ -34,6 +34,7 @@ MODULE ModRamDrift
 !                       Calculate drift parameters
 !**************************************************************************
   SUBROUTINE DRIFTPARA(S)
+    ! Initializes the parameters needed for the drift equations
 
     use ModRamMain,      ONLY: DP
     use ModRamConst,     ONLY: PI
@@ -64,7 +65,6 @@ MODULE ModRamDrift
     DO I=1,NR
       DO J=1,NT
         VR(I)=DTs/MDR/(RLZ(I)+0.5*MDR)/2/DPHI
-        ! Kp dependent part of azimuthal drift 
         P1(I)=DTs/DPHI/2/MDR/RLZ(I)
       END DO
       DO K=1,NE
@@ -113,6 +113,8 @@ MODULE ModRamDrift
     sgn = 1; CR = 0.0; F = 0.0; FBND = 0.0
 
     DTDriftR(S) = 100000.0
+
+    ! ExB Radial Drift
     DO I=1,NR
        DO J=1,NT
           J0=J-1
@@ -124,6 +126,7 @@ MODULE ModRamDrift
        ENDDO
     ENDDO
 
+    ! Gradient Curvature Radial Drift
     DO K=1,NE
        P4=DTs*EKEV(K)*1000.0*(GREL(S,K)+1)/GREL(S,K)/DPHI/MDR/QS
        DO L=1,NPA
@@ -139,6 +142,7 @@ MODULE ModRamDrift
                 CGR3=CGR1+(FNIS(I+1,J,L)+FNIS(I,J,L)-2*FNHS(I+1,J,L) &
                      -2*FNHS(I,J,L))*CGR2/2./(BNES(I+1,J)+BNES(I,J))
                 CGR=CGR3/(FNHS(I,J,L)+FNHS(I+1,J,L))*P4/2./(BNES(I,J)+BNES(I+1,J))/(RLZ(I)+0.5*MDR)
+                ! ExB Radial Drift + Gradient Curvature Radial Drift
                 CDriftR(I,J,K,L)=CR(I,J)+CGR
                 if (outsideMGNP(i,j) == 0) then
                    ctemp = max(abs(CDriftR(I,J,K,L)),1E-10)

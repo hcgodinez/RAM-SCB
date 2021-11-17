@@ -43,9 +43,12 @@ module ModRamInjection
      OPEN(UNITTMP_,FILE=trim(filename),STATUS='OLD')
      READ(UNITTMP_,'(A)') HEADER
      read_file: do
+        ! Current file format assumes x, y, and z are in Re
+        ! energy is in eV, and pitch angle is in degrees
         read(UNITTMP_,*,IOSTAT=IError) xGEO, yGEO, zGEO, e_i, a_i, d_i
         if (iError.ne.0) exit read_file
 
+        ! Convert from GEO coordinates to SM coordinates
         call GEOGSW_08(XGEO,YGEO,ZGEO,xGSW,yGSW,zGSW,1)
         CALL SMGSW_08(x_i,y_i,z_i,xGSW,yGSW,zGSW,-1)
 
@@ -56,6 +59,7 @@ module ModRamInjection
         alpha_0 = a_i*pi_d/180.0            ! rad
         den     = d_i
 
+        ! Find the correct R, T, E, Pa bin
         iR = 1
         do i = 2,nR
           if ((r0 > Lz(i-1)).and.(r0 < Lz(i))) then
@@ -88,6 +92,7 @@ module ModRamInjection
           endif
         enddo
 
+        ! Add the number density to the grid assuming a maxwellian distribution in energy 
         factor = 4.0E6*EkeV(iE)
         den = 1._dp/sqrt(species(S)%s_mass)*exp(-1._dp*EkeV(iE)/energy)*factor*den*energy**(-1.5)
         !den = FFactor(S,iR,iE,iPa)*FNHS(iR,iT,iPa)*den/dE(iE)/dMu(iPa)
@@ -96,7 +101,7 @@ module ModRamInjection
      CLOSE(UNITTMP_)
 
      fluxOut(:,:,:,:) = num_density
-write(*,*) maxval(fluxOut)
+
      deallocate(num_density)
      return
 

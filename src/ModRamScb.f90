@@ -18,7 +18,7 @@ Module ModRamScb
 
 !==================================================================================================
   subroutine ramscb_allocate
-  
+    ! Allocates arrays needed for storing the 3D flux mapping  
     use ModRamGrids, ONLY: NS, NE, NPA
     use ModScbGrids, ONLY: nthe, npsi, nzeta
   
@@ -33,7 +33,7 @@ Module ModRamScb
 
 !==================================================================================================
   subroutine ramscb_deallocate
-  
+    ! Deallocates allocated arrays
     implicit none
   
     DEALLOCATE(INDEXPA, Flux3DEq)
@@ -42,7 +42,7 @@ Module ModRamScb
 
 !==================================================================================================
   subroutine Compute3DFlux
-  
+    ! Convert the distribution function to a 3D flux
     use ModRamVariables, ONLY: FLUX, MU, FFACTOR, FNHS, F2
     use ModRamGrids,     ONLY: nR, nT, nPa, nE, radout, RadiusMin, nS
   
@@ -59,7 +59,8 @@ Module ModRamScb
   
     integer :: i, j, k, L, iS, GSLErr
     real(DP) :: MuEq, radius, angle
-  
+ 
+    ! Convert RAM normalized distribution function to 2D Flux
     DO iS = 1,nS
        DO I = 2, NR
           DO K = 2, NE
@@ -141,7 +142,9 @@ Module ModRamScb
 
 !==================================================================================================
   SUBROUTINE computehI(iter)
-  
+    ! Calculates the h and I integral and bounce averaged densities by
+    ! converting the SCB coordinates to RAM coordinates and then computing the
+    ! interals 
     use ModRamVariables, ONLY: FNHS, FNIS, BNES, HDNS, dBdt, dHdt, &
                                dIdt, dIbndt, BOUNHS, BOUNIS, EIR, EIP, flux_volume, &
                                LZ, MU, MLT, PAbn, PA, DL1, outsideMGNP, xRAM, yRAM, zRAM
@@ -168,7 +171,8 @@ Module ModRamScb
   
     use nrtype,    ONLY: DP, pi_d, twopi_d
   
-use ModTimeConvert, ONLY: n_day_of_year
+    use ModTimeConvert, ONLY: n_day_of_year
+
     implicit none
   
     INTEGER, INTENT(IN) :: iter
@@ -211,8 +215,10 @@ use ModTimeConvert, ONLY: n_day_of_year
 
     ! Don't need to run if using Dipole magnetic field boundary unless it is run from the initialization step
     if ((NameBoundMag.eq.'DIPL').and.(iter.ne.0)) return
-call RECALC_08(TimeRamNow%iYear,n_day_of_year(TimeRamNow%iYear,TimeRamNow%iMonth,TimeRamNow%iDay), &
-               TimeRamNow%iHour,TimeRamNow%iMinute,TimeRamNow%iSecond,-400._dp,0._dp,0._dp)
+
+    ! If we need to do any Geopack tracing, we need to make sure RECALC has been called
+    call RECALC_08(TimeRamNow%iYear,n_day_of_year(TimeRamNow%iYear,TimeRamNow%iMonth,TimeRamNow%iDay), &
+                   TimeRamNow%iHour,TimeRamNow%iMinute,TimeRamNow%iSecond,-400._dp,0._dp,0._dp)
     clock_rate = 1000
     clock_max = 100000
     LMAX = 1000
@@ -246,14 +252,6 @@ call RECALC_08(TimeRamNow%iYear,n_day_of_year(TimeRamNow%iYear,TimeRamNow%iMonth
        call system_clock(time1,clock_rate,clock_max)
        starttime=time1/real(clock_rate,dp)
 
-       ! If using SWMF without SCB calculation just take directly from grids
-       if ((NameBoundMag.eq.'SWMF').and.(method == 3)) then
-          xRAM(:,:,:) = x(:,1:nR,:)
-          yRAM(:,:,:) = y(:,1:nR,:)
-          zRAM(:,:,:) = z(:,1:nR,:)
-          bRAM(:,:,:) = bf(:,1:nR,:)
-       endif
-   
   !$OMP PARALLEL DO
        do i = 1,nR
           do j = 1,nT
@@ -538,6 +536,7 @@ call RECALC_08(TimeRamNow%iYear,n_day_of_year(TimeRamNow%iYear,TimeRamNow%iMonth
     ! now uses RAM variables so the numbers will be different
     DthI = TimeRamElapsed-TOld
 
+    ! Smooth the h and I integrals and bounce averaged values using a gaussian filter
     if (integral_smooth) then
        allocate(output(nR,nT))
        do L = 2,NPA
@@ -564,6 +563,7 @@ call RECALC_08(TimeRamNow%iYear,n_day_of_year(TimeRamNow%iYear,TimeRamNow%iMonth
        deallocate(output)
     endif
 
+    ! Fill in the RAM variables and calculate all dt values
     DO I=2,NR+1
        DO J=1,NT
           BNESPrev(I,J) = BNES(I,J)
@@ -644,7 +644,9 @@ call RECALC_08(TimeRamNow%iYear,n_day_of_year(TimeRamNow%iYear,TimeRamNow%iMonth
 
 !==================================================================================================
   SUBROUTINE computehI_test(iter)
-  
+    ! Calculates the h and I integral and bounce averaged densities by
+    ! computing them on the SCB grid and then interpolating them onto the RAM
+    ! grid
     use ModRamVariables, ONLY: FNHS, FNIS, BNES, HDNS, ODNS, NDNS, dBdt, dHdt, &
                                dIdt, dIbndt, BOUNHS, BOUNIS, EIR, EIP, flux_volume, Phi, &
                                LZ, MU, MLT, PAbn, PA, DL1, outsideMGNP, xRAM, yRAM, zRAM
