@@ -377,34 +377,6 @@ module ModRamRestart
     iStatus = nf90_close(iFileID)
     call ncdf_check(iStatus, NameSub)
 
-    ! ------------------------------------------
-    ! DEBUG
-    ! DUMP OUTPUT
-!    open(900)
-!    open(1000)
-!    open(1100)
-!    do S=1,nS
-!       do L = 1, nPa
-!          do K = 1, nE
-!             do J = 1, nT
-!               write(900,2000) (F2(S,I,J,K,L),I=1,nR)
-!             enddo
-!             write(1000,2000) (FFactor(S,I,K,L),I=1,nR)
-!          enddo
-!       enddo
-!    enddo
-!    do L = 1, nPa
-!       do J = 1, nT
-!          write(1100,2000) (FNHS(I,J,L),I=1,nR)
-!       enddo
-!    enddo
-!    close(900)
-!    close(1000)
-!    close(1100)
-    ! ------------------------------------------
-
-2000 format(500(1X,E26.16E3))
-
   end subroutine write_restart
 
   !==========================================================================
